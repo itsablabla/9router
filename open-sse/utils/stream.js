@@ -242,8 +242,9 @@ export function createSSEStream(options = {}) {
           reqLogger?.appendConvertedChunk?.(output);
           controller.enqueue(sharedEncoder.encode(output));
           // Upstream [DONE] was forwarded verbatim above; mark it so flush()
-          // does not append a duplicate sentinel.
-          if (trimmed === "data: [DONE]") streamDoneSent = true;
+          // does not append a duplicate sentinel. The space after "data:" is
+          // optional per the SSE spec, so tolerate "data:[DONE]" as well.
+          if (trimmed.startsWith("data:") && trimmed.slice(5).trim() === "[DONE]") streamDoneSent = true;
           // Responses clients (codex CLI) close on response.completed instead of [DONE]
           if (responsesTerminal) finalizeStream();
           continue;
