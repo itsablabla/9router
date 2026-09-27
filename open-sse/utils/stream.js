@@ -241,6 +241,9 @@ export function createSSEStream(options = {}) {
 
           reqLogger?.appendConvertedChunk?.(output);
           controller.enqueue(sharedEncoder.encode(output));
+          // Upstream [DONE] was forwarded verbatim above; mark it so flush()
+          // does not append a duplicate sentinel.
+          if (trimmed === "data: [DONE]") streamDoneSent = true;
           // Responses clients (codex CLI) close on response.completed instead of [DONE]
           if (responsesTerminal) finalizeStream();
           continue;
@@ -275,7 +278,9 @@ export function createSSEStream(options = {}) {
             sseEmittedCount++;
           }
 
-          if (keepsOpenAIResponsesFormat && !streamDoneSent) {
+          // Forward the terminal sentinel to clients that expect it: OpenAI
+          // chat-completions clients need [DONE]; Responses passthrough too.
+          if ((keepsOpenAIResponsesFormat || sourceFormat === FORMATS.OPENAI) && !streamDoneSent) {
             const doneOutput = "data: [DONE]\n\n";
             reqLogger?.appendConvertedChunk?.(doneOutput);
             controller.enqueue(sharedEncoder.encode(doneOutput));
@@ -482,6 +487,18 @@ export function createSSEStream(options = {}) {
           reqLogger?.appendConvertedChunk?.(doneOutput);
           controller.enqueue(sharedEncoder.encode(doneOutput));
           openAIResponsesDoneSent = true;
+          streamDoneSent = true;
+        }
+
+        // OpenAI chat-completions clients require the terminal [DONE] sentinel.
+        // Gemini-family upstreams (streamGenerateContent) never send one and the
+        // gemini-to-openai translator does not synthesize it, so without this the
+        // connection just closes and strict SSE clients (e.g. Onyx) report the
+        // response as terminated prior to completion.
+        if (sourceFormat === FORMATS.OPENAI && !streamDoneSent) {
+          const doneOutput = "data: [DONE]\n\n";
+          reqLogger?.appendConvertedChunk?.(doneOutput);
+          controller.enqueue(sharedEncoder.encode(doneOutput));
           streamDoneSent = true;
         }
 
